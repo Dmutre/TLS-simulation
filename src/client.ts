@@ -67,7 +67,10 @@ const main = async () => {
       const maybe = handshake.handleResponse(data as MessageResponse)
       if (maybe) {
         console.log('Response from server:', maybe)
-        socket.end()
+        // Close connection after receiving final response
+        setTimeout(() => {
+          socket.end()
+        }, 100)
       }
       return
     }
@@ -78,7 +81,10 @@ const main = async () => {
         const maybe = handshake.handleResponse(received.response as MessageResponse)
         if (maybe) {
           console.log('Response from server:', maybe)
-          socket.end()
+          // Close connection after receiving final response
+          setTimeout(() => {
+            socket.end()
+          }, 100)
         }
       } else {
         console.log('Received ACK without response')
