@@ -1,0 +1,22 @@
+{
+  "name": "tls-topology-rgr",
+  "version": "1.0.0",
+  "description": "TLS/SSL handshake simulation with topology and CA server",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start:ca": "ts-node src/ca-server.ts",
+    "start:node": "ts-node src/node-server.ts",
+    "start:client": "ts-node src/client.ts"
+  },
+  "dependencies": {
+    "async-lock": "^1.4.1",
+    "uuid": "^13.0.0"
+  },
+  "devDependencies": {
+    "@types/async-lock": "^1.4.2",
+    "@types/node": "^22.0.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.6.3"
+  }
+}
