@@ -1,6 +1,6 @@
-// src/client.ts
 import net from 'node:net'
 import fs from 'node:fs/promises'
+import crypto from 'node:crypto'
 import {
   parseArgs,
   sendWithPacketLimit,
@@ -16,6 +16,7 @@ import {
   ProtocolMessage,
   ClientDataMessages,
   ServerMessages,
+  MessageReceived,
 } from './protocol/messages'
 import { ClientHandShakeHandler } from './protocol/handshakeClient'
 import { createMap } from './graph'
@@ -29,7 +30,7 @@ const main = async () => {
   const caHost = args['caHost'] ?? 'localhost'
   const caPort = Number(args['caPort'] ?? 9000)
   const message = args['message'] ?? 'Hello from client'
-  const filePath = args['file'] // optional
+  const filePath = args['file']
 
   const graph = createMap(routeMap)
   const route = graph.findRoute(from, to)!
@@ -50,21 +51,42 @@ const main = async () => {
   let createEncryptedRequest: ((msg: ClientDataMessages['request']) => MessageRequest) | null = null
 
   const handler = new DataHandler(async buffer => {
-    const msg = JSON.parse(buffer.toString()) as ProtocolMessage<ServerMessages | MessageResponse>
+    const msg = JSON.parse(buffer.toString()) as ProtocolMessage<
+      ServerMessages | MessageResponse | MessageReceived<MessageResponse | undefined>
+    >
     console.log('Received message:', msg)
 
-    if ((msg.data as any).type === 'initial_handshake' || (msg.data as any).type === 'ready' || (msg.data as any).type === 'response') {
-      await handshake.handleMessage(
-        msg.data as ServerMessages,
-      )
-      const maybe = handshake.handleResponse(
-        msg.data as MessageResponse,
-      )
+    const data: any = msg.data
+
+    if (data.type === 'initial_handshake' || data.type === 'ready' || data.type === 'premaster_ack') {
+      await handshake.handleMessage(data as ServerMessages)
+      return
+    }
+
+    if (data.type === 'response') {
+      const maybe = handshake.handleResponse(data as MessageResponse)
       if (maybe) {
         console.log('Response from server:', maybe)
         socket.end()
       }
+      return
     }
+
+    if (data.type === 'received') {
+      const received = data as MessageReceived<MessageResponse | undefined>
+      if (received.response && (received.response as any).type === 'response') {
+        const maybe = handshake.handleResponse(received.response as MessageResponse)
+        if (maybe) {
+          console.log('Response from server:', maybe)
+          socket.end()
+        }
+      } else {
+        console.log('Received ACK without response')
+      }
+      return
+    }
+
+    console.log('Unknown message type on client:', data.type)
   })
 
   const handshake = new ClientHandShakeHandler({
@@ -84,7 +106,7 @@ const main = async () => {
       createEncryptedRequest = creator
       console.log('Handshake complete, sending data...')
 
-      sendData()
+      void sendData()
     },
   })
 
@@ -117,8 +139,6 @@ const main = async () => {
     sendWithPacketLimit(socket, buf)
   }
 }
-
-const crypto = require('node:crypto')
 
 const guessPortForNode = (node: string): number => {
   const base = 7000

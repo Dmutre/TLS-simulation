@@ -1,7 +1,3 @@
-/**
- * Helper messages
- */
-
 export type MessageReceived<TResponse = void> = {
   type: 'received'
   messageId: string
@@ -13,10 +9,6 @@ export type ProtocolMessage<T = unknown> = {
   route: string[]
   data: T
 }
-
-/**
- * Handshake messages
- */
 
 export type CMessageInitialHandShake = {
   type: 'initial_handshake'
@@ -32,6 +24,10 @@ export type SMessageInitialHandShake = {
   type: 'initial_handshake'
   random: string
   sslCertificate: string
+}
+
+export type SMessagePremasterAck = {
+  type: 'premaster_ack'
 }
 
 type MessageReady = {
@@ -60,12 +56,9 @@ export type ClientMessages =
 
 export type ServerMessages =
   | SMessageInitialHandShake
+  | SMessagePremasterAck
   | SMessageReady
   | MessageResponse
-
-/**
- * Data messages (app-level)
- */
 
 export type ClientDataMessageEcho = {
   type: 'echo'

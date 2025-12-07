@@ -93,6 +93,7 @@ const main = async () => {
 
     const handler = new DataHandler(async messageBuffer => {
       const raw = messageBuffer.toString()
+      console.log('Raw message:', raw)
       const msg = JSON.parse(raw) as ProtocolMessage<
         ClientMessages | MessageReceived
       >

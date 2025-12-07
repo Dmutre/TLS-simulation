@@ -72,11 +72,12 @@ export class ClientHandShakeHandler {
   private readonly caHost: string
   private readonly caPort: number
   private readonly serverHost: string
-  private state: 'initiate_handshake' | 'ready' | 'ready_complete'
+  private state: 'initiate_handshake' | 'premaster_sent' | 'ready' | 'ready_complete'
 
   private clientRandom: string | null = null
   private serverRandom: string | null = null
   private sslCertificate: string | null = null
+  private premasterSecret: string | null = null
   private sessionSecret: ArrayBuffer | null = null
 
   constructor(opts: {
@@ -100,6 +101,7 @@ export class ClientHandShakeHandler {
       (message: ServerMessages) => Promise<void> | void
     > = {
       initiate_handshake: this.handleInitiateHandShake.bind(this),
+      premaster_sent: this.handlePremasterAck.bind(this),
       ready: this.handleReady.bind(this),
       ready_complete: this.handleReadyComplete.bind(this)
     }
@@ -149,15 +151,25 @@ export class ClientHandShakeHandler {
 
     const { encrypted: premaster, decrypted: premasterSecret } =
       Premaster.encrypt({ sslCertificate })
+    this.premasterSecret = premasterSecret
+    
     const premasterMsg = {
       type: 'premaster' as const,
       premaster
     }
 
     await this.writeMessage(premasterMsg)
+    this.state = 'premaster_sent'
+  }
+
+  private async handlePremasterAck(message: ServerMessages) {
+    assertThat(
+      message.type === 'premaster_ack',
+      `Expected premaster_ack message`
+    )
 
     const key = await genSessionKey({
-      premasterSecret,
+      premasterSecret: this.getPremasterSecret(),
       clientRandom: this.getClientRandom(),
       serverRandom: this.getServerRandom()
     })
@@ -189,7 +201,6 @@ export class ClientHandShakeHandler {
   }
 
   private handleReadyComplete(_message: ServerMessages) {
-    // no-op
   }
 
   private getClientRandom(): string {
@@ -202,6 +213,12 @@ export class ClientHandShakeHandler {
     const random = this.serverRandom
     assertThat(random, 'serverRandom not set')
     return random!
+  }
+
+  private getPremasterSecret(): string {
+    const secret = this.premasterSecret
+    assertThat(secret, 'premasterSecret not set')
+    return secret
   }
 
   private getSessionKey(): NonNullable<typeof this.sessionSecret> {

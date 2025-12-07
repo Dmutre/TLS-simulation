@@ -13,6 +13,7 @@ import {
   ClientMessages,
   MessageResponse,
   SMessageInitialHandShake,
+  SMessagePremasterAck,
   SMessageReady
 } from './messages'
 
@@ -27,7 +28,7 @@ export class ServerHandShakeHandler {
   private state:
     | 'initial_handshake'
     | 'premaster_secret'
-    | 'ready'
+    | 'waiting_for_client_ready'
     | 'ready_complete'
 
   private clientRandom: string | null = null
@@ -45,8 +46,9 @@ export class ServerHandShakeHandler {
     this.certificate = opts.certificate
   }
 
-  async handleMessage(message: ClientMessages): Promise<SMessageInitialHandShake | SMessageReady | MessageResponse | void> {
+  async handleMessage(message: ClientMessages): Promise<SMessageInitialHandShake | SMessagePremasterAck | SMessageReady | MessageResponse | void> {
     const { state } = this
+    console.log('handling state: ', state, ' message: ', message)
     const handlers = {
       initial_handshake: (m: ClientMessages) =>
         this.lock.acquire('handshake', async () => {
@@ -56,7 +58,7 @@ export class ServerHandShakeHandler {
         this.lock.acquire('handshake', async () => {
           return await this.handlePremasterSecret(m)
         }),
-      ready: (m: ClientMessages) =>
+      waiting_for_client_ready: (m: ClientMessages) =>
         this.lock.acquire('handshake', async () => {
           return await this.handleReady(m)
         }),
@@ -93,7 +95,7 @@ export class ServerHandShakeHandler {
 
   private async handlePremasterSecret(
     message: ClientMessages
-  ): Promise<SMessageReady> {
+  ): Promise<SMessagePremasterAck> {
     assertThat(message.type === 'premaster', `Expected premaster message`)
 
     const premaster = Premaster.decrypt({
@@ -107,19 +109,15 @@ export class ServerHandShakeHandler {
       serverRandom: this.getServerRandom()
     })
     this.sessionSecret = key
-    this.state = 'ready'
+    this.state = 'waiting_for_client_ready'
 
-    const readyMsg: SMessageReady = {
-      type: 'ready',
-      payload: Message.encrypt({
-        sessionKey: Buffer.from(new Uint8Array(this.getSessionKey())),
-        message: READY_MESSAGE
-      })
+    const ackMsg: SMessagePremasterAck = {
+      type: 'premaster_ack'
     }
-    return readyMsg
+    return ackMsg
   }
 
-  private async handleReady(message: ClientMessages): Promise<void> {
+  private async handleReady(message: ClientMessages): Promise<SMessageReady> {
     assertThat(message.type === 'ready', `Expected ready message`)
 
     const payload = Message.decrypt({
@@ -129,6 +127,15 @@ export class ServerHandShakeHandler {
     assertThat(payload === READY_MESSAGE, `Expected ready payload message`)
 
     this.state = 'ready_complete'
+
+    const readyMsg: SMessageReady = {
+      type: 'ready',
+      payload: Message.encrypt({
+        sessionKey: Buffer.from(new Uint8Array(this.getSessionKey())),
+        message: READY_MESSAGE
+      })
+    }
+    return readyMsg
   }
 
   private async handleReadyComplete(
