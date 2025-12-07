@@ -47,6 +47,10 @@ export class ServerHandShakeHandler {
   }
 
   async handleMessage(message: ClientMessages): Promise<SMessageInitialHandShake | SMessagePremasterAck | SMessageReady | MessageResponse | void> {
+    if (message.type === 'initial_handshake') {
+      this.reset()
+    }
+
     const { state } = this
     console.log('handling state: ', state, ' message: ', message)
     const handlers = {
@@ -68,6 +72,13 @@ export class ServerHandShakeHandler {
 
     const handler = handlers[state]
     return await handler(message)
+  }
+
+  private reset() {
+    this.state = 'initial_handshake'
+    this.clientRandom = null
+    this.serverRandom = null
+    this.sessionSecret = null
   }
 
   private async handleInitialHandShake(

@@ -1,4 +1,3 @@
-// src/node-server.ts
 import net from 'node:net'
 import fs from 'node:fs/promises'
 import path from 'node:path'
@@ -36,7 +35,7 @@ const loadConfig = async (): Promise<NodeConfig> => {
   const CA_HOST = args['caHost'] ?? 'localhost'
   const CA_PORT = Number(args['caPort'] ?? 9000)
   const ROUTE_MAP =
-    args['routeMap'] ?? 'A:B,B:C,C:D,C:E' // можна задати ззовні
+    args['routeMap'] ?? 'A:B,B:C,C:D,C:E'
 
   const keysPath = path.join(SECRETS_PATH, `node_${NODE_NAME}`)
   const privateKeyPath = path.join(keysPath, `${NODE_NAME}.key`)
@@ -60,6 +59,37 @@ const main = async () => {
   const config = await loadConfig()
   const graph = createMap(config.ROUTE_MAP)
 
+  const handshakeHandlers = new Map<string, ServerHandShakeHandler>()
+
+  const getOrCreateHandshakeHandler = (route: string[]) => {
+    const routeKey = route.join(':')
+    if (!handshakeHandlers.has(routeKey)) {
+      handshakeHandlers.set(routeKey, new ServerHandShakeHandler({
+        privateKey: config.PRIVATE_KEY,
+        certificate: config.CERTIFICATE,
+        handleRequest: async (req: any) => {
+          switch (req.action) {
+            case 'echo':
+              return { echoedMessage: `[${config.NODE_NAME}] ${req.message}` }
+            case 'chat':
+              console.log(
+                `[${config.NODE_NAME}] chat message:`,
+                req.message,
+              )
+              return { ok: true }
+            default:
+              console.log(
+                `[${config.NODE_NAME}] unknown action`,
+                req.action,
+              )
+              return { error: 'Unknown action', ok: false }
+          }
+        },
+      }))
+    }
+    return handshakeHandlers.get(routeKey)!
+  }
+
   const server = net.createServer(socket => {
     console.log(
       `[${config.NODE_NAME}] new client`,
@@ -68,28 +98,6 @@ const main = async () => {
     )
 
     const messageConsumer = new MessageConsumer()
-    const handshakeHandler = new ServerHandShakeHandler({
-      privateKey: config.PRIVATE_KEY,
-      certificate: config.CERTIFICATE,
-      handleRequest: async (req: any) => {
-        switch (req.action) {
-          case 'echo':
-            return { echoedMessage: `[${config.NODE_NAME}] ${req.message}` }
-          case 'chat':
-            console.log(
-              `[${config.NODE_NAME}] chat message:`,
-              req.message,
-            )
-            return { ok: true }
-          default:
-            console.log(
-              `[${config.NODE_NAME}] unknown action`,
-              req.action,
-            )
-            return { error: 'Unknown action', ok: false }
-        }
-      },
-    })
 
     const handler = new DataHandler(async messageBuffer => {
       const raw = messageBuffer.toString()
@@ -100,18 +108,15 @@ const main = async () => {
 
       const isFinal = msg.route.at(-1) === config.NODE_NAME
       if (!isFinal) {
-        // >>> проміжна нода — форвардимо
         const currentIndex = msg.route.findIndex(n => n === config.NODE_NAME)
         const nextNode = msg.route[currentIndex + 1]
         assertThat(nextNode, 'Next node is undefined in route')
 
-        const nextPort = guessPortForNode(nextNode) // для простоти: мапа node->port
+        const nextPort = guessPortForNode(nextNode)
         const resp = await forwardToNode(nextNode, nextPort, msg)
         sendWithPacketLimit(socket, wrapMessage(resp))
         return
       }
-
-      // >>> це кінцева нода
       if (msg.data.type === 'received') {
         messageConsumer.consume({
           messageId: msg.data.messageId,
@@ -121,6 +126,7 @@ const main = async () => {
         return
       }
 
+      const handshakeHandler = getOrCreateHandshakeHandler(msg.route)
       const result = await handshakeHandler.handleMessage(
         msg.data as ClientMessages,
       )
@@ -155,8 +161,6 @@ const main = async () => {
   })
 }
 
-// Допоміжна штука – дуже проста "мапа" node->port.
-// В РГР можеш зробити це краще (через конфіг, env, JSON-файл, тощо).
 const guessPortForNode = (node: string): number => {
   const base = 7000
   const offset = node.toUpperCase().charCodeAt(0) - 'A'.charCodeAt(0)
