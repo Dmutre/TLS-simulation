@@ -307,13 +307,40 @@ export const sendWithPacketLimit = (socket: net.Socket, buffer: Buffer) => {
 export const parseArgs = (): Record<string, string> => {
   const args = process.argv.slice(2)
   const res: Record<string, string> = {}
+  
   for (let i = 0; i < args.length; i++) {
     const a = args[i]
     if (a.startsWith('--')) {
       const key = a.slice(2)
-      const value = args[i + 1]
-      res[key] = value
-      i++
+      // Check if value is in the same argument (--key="value" or --key=value)
+      if (a.includes('=')) {
+        const parts = a.split('=', 2)
+        const keyName = parts[0].slice(2) // Remove '--'
+        let value = parts[1] || ''
+        // Remove surrounding quotes if present (handle both single and double quotes)
+        if (value.length >= 2) {
+          if ((value.startsWith('"') && value.endsWith('"')) || 
+              (value.startsWith("'") && value.endsWith("'"))) {
+            value = value.slice(1, -1)
+          }
+        }
+        res[keyName] = value
+      } else {
+        // Value is in next argument (--key value)
+        const value = args[i + 1]
+        if (value && !value.startsWith('--')) {
+          let cleanValue = value
+          // Remove surrounding quotes if present
+          if (cleanValue.length >= 2) {
+            if ((cleanValue.startsWith('"') && cleanValue.endsWith('"')) || 
+                (cleanValue.startsWith("'") && cleanValue.endsWith("'"))) {
+              cleanValue = cleanValue.slice(1, -1)
+            }
+          }
+          res[key] = cleanValue
+          i++
+        }
+      }
     }
   }
   return res

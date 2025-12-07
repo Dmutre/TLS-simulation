@@ -17,10 +17,14 @@ class Graph {
     t!.addNeighbour(f!)
   }
 
-  findRoute(from: string, to: string): string[] | null {
+  findRoute(from: string, to: string, excludeNodes: Set<string> = new Set()): string[] | null {
     const start = this.nodes.get(from)
     const end = this.nodes.get(to)
     assertThat(start && end, 'Both nodes must exist to find route')
+
+    if (excludeNodes.has(from) || excludeNodes.has(to)) {
+      return null
+    }
 
     const visited = new Set<string>()
     const queue: Array<{ node: Node; path: string[] }> = [
@@ -32,12 +36,38 @@ class Graph {
       if (node.value === end!.value) return path
       visited.add(node.value)
       for (const n of node) {
-        if (!visited.has(n.value)) {
+        if (!visited.has(n.value) && !excludeNodes.has(n.value)) {
           queue.push({ node: n, path: [...path, n.value] })
         }
       }
     }
     return null
+  }
+
+  getAllNodes(): string[] {
+    return Array.from(this.nodes.keys())
+  }
+
+  getAllReachableNodes(from: string): string[] {
+    const start = this.nodes.get(from)
+    assertThat(start, `Node ${from} does not exist`)
+
+    const visited = new Set<string>()
+    const queue: Node[] = [start!]
+
+    while (queue.length > 0) {
+      const node = queue.shift()!
+      if (visited.has(node.value)) continue
+      visited.add(node.value)
+      
+      for (const n of node) {
+        if (!visited.has(n.value)) {
+          queue.push(n)
+        }
+      }
+    }
+
+    return Array.from(visited)
   }
 }
 

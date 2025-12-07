@@ -53,13 +53,19 @@
   - Виконує handshake (premaster, session key).
   - Далі шле зашифровані `data`-повідомлення (echo / чат / файл).
 
+- **Broadcast Client (`broadcast-client.ts`)**
+  - Відправляє повідомлення до всіх доступних нод у топології.
+  - Знаходить всі досяжні ноди через граф (BFS).
+  - Для кожної ноди встановлює окреме TLS-з'єднання через маршрут.
+  - Збирає відповіді від усіх нод і виводить підсумок.
+
 ---
 
 ### 1.2. Логічна схема взаємодії
 
 ```mermaid
 graph LR
-  subgraph CA
+  subgraph CAServer[CA Service]
     CA[CA Server]
   end
 
@@ -204,6 +210,7 @@ export const sendWithPacketLimit = (socket: net.Socket, buffer: Buffer) => {
 │   ├── ca-server.ts
 │   ├── node-server.ts
 │   ├── client.ts
+│   ├── broadcast-client.ts
 │   └── protocol
 │       ├── messages.ts
 │       ├── dataHandler.ts
@@ -342,6 +349,75 @@ npx ts-node src/client.ts ^
 - запакує в `action="chat", message="[FILE example.txt]\n<вміст>"`,
 - зашифрує і відправить до `E`.
 
+### 8.5. Запуск Broadcast
+
+Broadcast відправляє повідомлення до всіх доступних нод у топології з урахуванням маршрутів.
+
+**Важливо:** Перед запуском broadcast необхідно запустити:
+- CA-сервер (порт 9000)
+- Всі ноди, які є в `routeMap`
+
+**Запуск:**
+
+```bash
+npx ts-node src/broadcast-client.ts \
+  --from A \
+  --routeMap "A:B,B:C,C:D" \
+  --message "Broadcast message" \
+  --action echo
+```
+
+**Параметри:**
+
+- `--from` – стартова нода для пошуку доступних нод (за замовчуванням `A`)
+- `--routeMap` – топологія графа (за замовчуванням `A:B,B:C,C:D,C:E`)
+- `--message` – повідомлення для відправки (за замовчуванням `Broadcast message`)
+- `--action` – тип дії: `echo`, `chat`, або `broadcast` (за замовчуванням `echo`)
+- `--caHost` – хост CA-сервера (за замовчуванням `localhost`)
+- `--caPort` – порт CA-сервера (за замовчуванням `9000`)
+
+**Як працює:**
+
+1. Broadcast-клієнт створює граф з `routeMap`
+2. Знаходить всі досяжні ноди від стартової ноди через BFS (`getAllReachableNodes`)
+3. Для кожної ноди:
+   - Знаходить маршрут через топологію (`findRoute`)
+   - Встановлює TLS-з'єднання через маршрут (handshake)
+   - Відправляє зашифроване повідомлення
+   - Отримує та розшифровує відповідь
+4. Виводить підсумок з відповідями від усіх нод
+
+**Приклад виводу:**
+
+```
+[Broadcast] Starting from node A
+[Broadcast] Route map: A:B,B:C,C:D
+[Broadcast] Nodes in graph: A, B, C, D
+[Broadcast] Reachable nodes: A, B, C, D
+[Broadcast] Sending message: "Broadcast message"
+
+[Broadcast] Sending to A via route: A
+[Broadcast] Response from A: {
+  "echoedMessage": "[A] Broadcast message"
+}
+
+[Broadcast] Sending to B via route: A -> B
+[Broadcast] Response from B: {
+  "echoedMessage": "[B] Broadcast message"
+}
+
+...
+
+==================================================
+Broadcast Summary:
+==================================================
+Total nodes: 4
+Successful: 4
+Failed: 0
+```
+
+**Примітка:** Через особливості обробки аргументів в PowerShell та npm, рекомендується використовувати прямий запуск через `npx ts-node` замість `npm run start:broadcast`.
+
 ---
 
 ## 9. Відповідність вимогам РГР
@@ -360,18 +436,13 @@ npx ts-node src/client.ts ^
 | Розподілена топологія 5+ нод                       | `graph.ts` + `routeMap` + декілька `node-server`        |
 | Handshake між будь-якою парою через проміжні ноди  | `route` + форвардинг у `node-server.ts`                 |
 | Обмеження розміру пакету                           | `MAX_PACKET_SIZE` + `sendWithPacketLimit()`             |
-| Broadcast з урахуванням топології                  | Легко додається як окремий `action: 'broadcast'`        |
+| Broadcast з урахуванням топології                  | `broadcast-client.ts` + `graph.getAllReachableNodes()`   |
 
-> Broadcast у базовому скелеті можна доробити як окремий `action`, який обходить усі reachable ноди в графі і шле їм повідомлення по побудованих маршрутах.
+> Broadcast реалізовано як окремий клієнт, який обходить усі досяжні ноди в графі через BFS і відправляє їм повідомлення по побудованих маршрутах з повним TLS handshake для кожної ноди.
 
 ---
 
 ## 10. Ідеї для розширення / допилювання
-
-- Додати:
-
-  - `action: 'broadcast'` у `handleRequest`,
-  - окрему CLI-утиліту `broadcast-client.ts`.
 
 - Логи:
 

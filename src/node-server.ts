@@ -48,7 +48,12 @@ class ConnectionManager {
     
     socket.on('data', d => handler.appendData(d))
     socket.on('error', err => {
-      console.error(`[ConnectionManager] Error on connection ${key}:`, err)
+      const errorCode = (err as any).code
+      if (errorCode === 'ECONNREFUSED') {
+        console.error(`[ConnectionManager] Connection refused to ${key} - node is not running`)
+      } else {
+        console.error(`[ConnectionManager] Error on connection ${key}:`, err)
+      }
       this.handleConnectionError(key, err)
     })
     socket.on('close', () => {
@@ -114,21 +119,50 @@ class ConnectionManager {
     msg: ProtocolMessage<any>
   ): Promise<ProtocolMessage<any>> {
     const key = `${node}:${port}`
-    const socket = this.getOrCreateConnection(node, port)
     
     return new Promise((resolve, reject) => {
+      let socket: net.Socket
+      try {
+        socket = this.getOrCreateConnection(node, port)
+      } catch (err: any) {
+        reject(new Error(`Failed to connect to ${node}:${port} - ${err.message}`))
+        return
+      }
+      
+      const connectionErrorHandler = (err: Error) => {
+        const errorCode = (err as any).code
+        if (errorCode === 'ECONNREFUSED') {
+          reject(new Error(`Connection refused to ${node}:${port} - node is not running`))
+        } else {
+          reject(new Error(`Connection error to ${node}:${port} - ${err.message}`))
+        }
+      }
+      
+      socket.once('error', connectionErrorHandler)
+      
       if (!this.pendingMessages.has(key)) {
         this.pendingMessages.set(key, [])
       }
       
       this.pendingMessages.get(key)!.push({
-        resolve,
-        reject,
+        resolve: (value) => {
+          socket.removeListener('error', connectionErrorHandler)
+          resolve(value)
+        },
+        reject: (reason) => {
+          socket.removeListener('error', connectionErrorHandler)
+          reject(reason)
+        },
         messageId: msg.id
       })
 
       const buf = wrapMessage(msg)
-      sendWithPacketLimit(socket, buf)
+      try {
+        sendWithPacketLimit(socket, buf)
+      } catch (err: any) {
+        socket.removeListener('error', connectionErrorHandler)
+        reject(new Error(`Failed to send message to ${node}:${port} - ${err.message}`))
+      }
     })
   }
 
@@ -215,6 +249,8 @@ const main = async () => {
                 req.message,
               )
               return { ok: true }
+            case 'broadcast':
+              return await handleBroadcast(req.message, graph, connectionManager, config.NODE_NAME)
             default:
               console.log(
                 `[${config.NODE_NAME}] unknown action`,
@@ -251,23 +287,34 @@ const main = async () => {
         assertThat(nextNode, 'Next node is undefined in route')
 
         const nextPort = guessPortForNode(nextNode)
-        const resp = await connectionManager.sendMessage(nextNode, nextPort, msg)
-        
-        sendWithPacketLimit(socket, wrapMessage(resp))
-        
-        const originalFirstNode = msg.route[0]
-        const isFinalResponse = resp.route.length > 0 && 
-                                resp.route[0] === originalFirstNode &&
-                                resp.data && 
-                                typeof resp.data === 'object' && 
-                                'type' in resp.data && 
-                                resp.data.type === 'received'
-        
-        const wasLastIntermediate = currentIndex === msg.route.length - 2
-        if (isFinalResponse && wasLastIntermediate) {
-          setTimeout(() => {
-            connectionManager.closeConnection(nextNode, nextPort)
-          }, 200)
+        try {
+          const resp = await connectionManager.sendMessage(nextNode, nextPort, msg)
+          
+          sendWithPacketLimit(socket, wrapMessage(resp))
+          
+          const originalFirstNode = msg.route[0]
+          const isFinalResponse = resp.route.length > 0 && 
+                                  resp.route[0] === originalFirstNode &&
+                                  resp.data && 
+                                  typeof resp.data === 'object' && 
+                                  'type' in resp.data && 
+                                  resp.data.type === 'received'
+          
+          const wasLastIntermediate = currentIndex === msg.route.length - 2
+          if (isFinalResponse && wasLastIntermediate) {
+            setTimeout(() => {
+              connectionManager.closeConnection(nextNode, nextPort)
+            }, 200)
+          }
+        } catch (err: any) {
+          console.error(`[${config.NODE_NAME}] Error forwarding to ${nextNode}:`, err.message)
+          const errorResponse: MessageReceived<{ error: string }> = {
+            type: 'received',
+            messageId: msg.id,
+            response: { error: `Failed to forward to ${nextNode}: ${err.message}` }
+          }
+          const errorMsg = createProtocolMessage(errorResponse, msg.route.toReversed())
+          sendWithPacketLimit(socket, errorMsg)
         }
         return
       }
@@ -295,20 +342,39 @@ const main = async () => {
           echo,
           msg.route.toReversed(),
         )
-        sendWithPacketLimit(socket, response)
-        
-        const isFinalResponse = (result as any)?.type === 'response'
-        if (isFinalResponse) {
-          setTimeout(() => {
-            socket.end()
-          }, 100)
+        try {
+          sendWithPacketLimit(socket, response)
+          
+          const isFinalResponse = (result as any)?.type === 'response'
+          if (isFinalResponse) {
+            const closeSocket = () => {
+              setTimeout(() => {
+                if (!socket.destroyed && socket.writable) {
+                  socket.end()
+                }
+              }, 200)
+            }
+            
+            if (socket.writableLength === 0) {
+              closeSocket()
+            } else {
+              socket.once('drain', closeSocket)
+              setTimeout(closeSocket, 500)
+            }
+          }
+        } catch (err) {
+          console.error(`[${config.NODE_NAME}] Error sending response:`, err)
         }
       } else {
         const response = createProtocolMessage(
           result,
           msg.route.toReversed(),
         )
-        sendWithPacketLimit(socket, response)
+        try {
+          sendWithPacketLimit(socket, response)
+        } catch (err) {
+          console.error(`[${config.NODE_NAME}] Error sending response:`, err)
+        }
       }
     })
 
@@ -333,6 +399,27 @@ const main = async () => {
     connectionManager.closeAll()
     process.exit(0)
   })
+}
+
+const handleBroadcast = async (
+  message: string,
+  graph: ReturnType<typeof createMap>,
+  connectionManager: ConnectionManager,
+  currentNode: string
+): Promise<{ responses: Array<{ node: string; response: any }> }> => {
+  const allNodes = graph.getAllReachableNodes(currentNode)
+  const targetNodes = allNodes.filter(node => node !== currentNode)
+  
+  console.log(`[${currentNode}] Broadcasting to nodes:`, targetNodes)
+  
+  const responses: Array<{ node: string; response: any }> = []
+  
+  responses.push({
+    node: currentNode,
+    response: { ok: true, message: `[${currentNode}] Received broadcast: ${message}` }
+  })
+  
+  return { responses }
 }
 
 const guessPortForNode = (node: string): number => {

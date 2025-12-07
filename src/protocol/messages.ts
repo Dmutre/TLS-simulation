@@ -82,6 +82,21 @@ export type ClientDataMessageChat = {
   }
 }
 
+export type ClientDataMessageBroadcast = {
+  type: 'broadcast'
+  request: {
+    action: 'broadcast'
+    message: string
+  }
+  response: {
+    responses: Array<{
+      node: string
+      response: { ok: boolean } | { echoedMessage: string } | { error: string }
+    }>
+  }
+}
+
 export type ClientDataMessages =
   | ClientDataMessageEcho
   | ClientDataMessageChat
+  | ClientDataMessageBroadcast
