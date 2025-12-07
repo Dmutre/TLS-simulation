@@ -40,7 +40,6 @@ export const getNodeName = (): string => {
 export const SECRETS_PATH = path.join(__dirname, '..', 'secrets')
 
 export const getRootCaCert = async (): Promise<string> => {
-  // За замовчуванням root CA лежить у secrets/rootCA.crt
   const certificatePath = path.join(SECRETS_PATH, 'rootCA.crt')
   const certificate = await fs.readFile(certificatePath, 'utf-8')
   return certificate
@@ -54,8 +53,6 @@ export function assertThat(
     throw new Error(message)
   }
 }
-
-// ----- Promise helper -----
 
 type Resolver<T> = {
   promise: Promise<T>
@@ -73,8 +70,6 @@ const createPromiseWithResolvers = <T>(): Resolver<T> => {
   return { promise, resolve, reject }
 }
 
-// ----- MessageConsumer -----
-
 export class MessageConsumer {
   private messages: Partial<Record<string, Resolver<unknown>>> = {}
 
@@ -91,12 +86,10 @@ export class MessageConsumer {
   }
 }
 
-// ----- Premaster / Session key -----
-
 export const Premaster = {
   encrypt: ({ sslCertificate }: { sslCertificate: string }) => {
     const publicKey = crypto.createPublicKey(sslCertificate)
-    const premasterSecret = crypto.randomBytes(48) // як у real TLS
+    const premasterSecret = crypto.randomBytes(48)
     const encryptedPremaster = crypto.publicEncrypt(
       {
         key: publicKey,
@@ -147,7 +140,6 @@ export const genSessionKey = async ({
   const infoLabel = 'tls13 derived'
   const len = 32
 
-  // Тут обіцяємо ArrayBufferLike, щоб не сварився TS на resolve(...)
   const { promise, resolve, reject } = createPromiseWithResolvers<ArrayBufferLike>()
 
   crypto.hkdf(
@@ -162,19 +154,14 @@ export const genSessionKey = async ({
         return
       }
 
-      // derivedKey у тайпінгах може бути ArrayBuffer / Buffer / ArrayBufferView -> нормалізуємо
       const view = new Uint8Array(derivedKey as ArrayBufferLike)
-      resolve(view.buffer) // тип: ArrayBufferLike, TS ок
+      resolve(view.buffer)
     }
   )
 
   const result = await promise
-  // А назовні повертаємо як ArrayBuffer, бо нам SharedArrayBuffer не потрібен
   return result as ArrayBuffer
 }
-
-
-// ----- Symmetric encryption (AES-256-GCM) -----
 
 export const Message = {
   encrypt: ({
@@ -258,8 +245,6 @@ export const createCypheredResponse = (
 
 export const READY_MESSAGE = 'ready'
 
-// ----- Certificate verification -----
-
 export const verifyCertificate = ({
   certificatePem,
   rootCaPem,
@@ -306,13 +291,10 @@ export const verifyCertificateSafe = ({
   }
 }
 
-// ----- Misc helpers -----
-
 export const sleep = ({ ms }: { ms: number }) => {
   return new Promise(resolve => setTimeout(resolve, ms))
 }
 
-// Обмеження розміру "радіо"-пакету
 export const MAX_PACKET_SIZE = 64
 
 export const sendWithPacketLimit = (socket: net.Socket, buffer: Buffer) => {
@@ -322,7 +304,6 @@ export const sendWithPacketLimit = (socket: net.Socket, buffer: Buffer) => {
   }
 }
 
-// Дуже простий парсер CLI аргументів типу --key value
 export const parseArgs = (): Record<string, string> => {
   const args = process.argv.slice(2)
   const res: Record<string, string> = {}

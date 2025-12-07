@@ -1,4 +1,3 @@
-// src/graph.ts
 import { assertThat } from './helpers'
 
 class Graph {

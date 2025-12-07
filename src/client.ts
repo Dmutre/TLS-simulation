@@ -67,7 +67,6 @@ const main = async () => {
       const maybe = handshake.handleResponse(data as MessageResponse)
       if (maybe) {
         console.log('Response from server:', maybe)
-        // Close connection after receiving final response
         setTimeout(() => {
           socket.end()
         }, 100)
@@ -81,7 +80,6 @@ const main = async () => {
         const maybe = handshake.handleResponse(received.response as MessageResponse)
         if (maybe) {
           console.log('Response from server:', maybe)
-          // Close connection after receiving final response
           setTimeout(() => {
             socket.end()
           }, 100)

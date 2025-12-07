@@ -2,18 +2,15 @@ Param(
     [string[]]$Nodes = @("A", "B", "C", "D", "E")
 )
 
-# Папка secrets біля цього скрипта
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $SecretsDir = Join-Path $ScriptDir "secrets"
 
 Write-Host "Creating secrets directory at $SecretsDir"
 New-Item -ItemType Directory -Force -Path $SecretsDir | Out-Null
 
-# Шляхи до root CA
 $RootKey = Join-Path $SecretsDir "rootCA.key"
 $RootCrt = Join-Path $SecretsDir "rootCA.crt"
 
-# 1. Генерація root CA, якщо ще немає
 if (-Not (Test-Path $RootKey)) {
     Write-Host "Generating root CA private key..."
     openssl genrsa -out $RootKey 4096
@@ -32,7 +29,6 @@ if (-Not (Test-Path $RootCrt)) {
     Write-Host "Root CA certificate already exists, skipping..."
 }
 
-# 2. Генерація ключів і сертифікатів для нод
 foreach ($Node in $Nodes) {
     Write-Host "Processing node $Node..."
 
@@ -65,7 +61,6 @@ foreach ($Node in $Nodes) {
         -out $CrtPath `
         -days 365 -sha256
 
-    # Можна почистити CSR, щоб не смітити
     Remove-Item $CsrPath -ErrorAction SilentlyContinue
 }
 

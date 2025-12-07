@@ -18,7 +18,6 @@ import { ServerHandShakeHandler } from './protocol/handshakeServer'
 import { createMap } from './graph'
 import { v4 as uuid } from 'uuid'
 
-// Connection manager to maintain persistent connections
 class ConnectionManager {
   private connections = new Map<string, net.Socket>()
   private pendingMessages = new Map<string, Array<{
@@ -36,14 +35,12 @@ class ConnectionManager {
       if (!existing.destroyed && existing.writable) {
         return existing
       }
-      // Connection is dead, remove it
       this.connections.delete(key)
       this.messageHandlers.delete(key)
     }
 
     const socket = net.createConnection({ host: 'localhost', port })
     
-    // Set up message handler for this connection
     const handler = new DataHandler(buffer => {
       const resp = JSON.parse(buffer.toString()) as ProtocolMessage<any>
       this.handleResponse(key, resp)
@@ -78,20 +75,15 @@ class ConnectionManager {
       return
     }
     
-    // Try to find matching pending message by message ID first
     let matchedIndex = -1
     if (message.data && typeof message.data === 'object' && 'type' in message.data) {
-      // If it's a "received" message, check the messageId inside
       if (message.data.type === 'received') {
         const received = message.data as MessageReceived<unknown>
         matchedIndex = pending.findIndex(p => p.messageId === received.messageId)
       }
     }
     
-    // If not found by messageId, try by route direction (response should have reversed route)
     if (matchedIndex === -1) {
-      // For now, use FIFO - take the first pending message
-      // This works because messages are sent sequentially
       matchedIndex = 0
     }
     
@@ -263,9 +255,6 @@ const main = async () => {
         
         sendWithPacketLimit(socket, wrapMessage(resp))
         
-        // Check if this is the final response going back to the original client
-        // The route is reversed when going back, so if route[0] is the original first node,
-        // and we have a final response, we can close the connection
         const originalFirstNode = msg.route[0]
         const isFinalResponse = resp.route.length > 0 && 
                                 resp.route[0] === originalFirstNode &&
@@ -274,11 +263,8 @@ const main = async () => {
                                 'type' in resp.data && 
                                 resp.data.type === 'received'
         
-        // Only close connection if this is the final response reaching back to the client
-        // and we're the last intermediate node (next node in original route was the final destination)
         const wasLastIntermediate = currentIndex === msg.route.length - 2
         if (isFinalResponse && wasLastIntermediate) {
-          // Give a small delay to ensure message is sent before closing
           setTimeout(() => {
             connectionManager.closeConnection(nextNode, nextPort)
           }, 200)
@@ -311,8 +297,6 @@ const main = async () => {
         )
         sendWithPacketLimit(socket, response)
         
-        // If this is the final node and we're sending a response, 
-        // we can close the connection after a delay
         const isFinalResponse = (result as any)?.type === 'response'
         if (isFinalResponse) {
           setTimeout(() => {
@@ -341,7 +325,6 @@ const main = async () => {
     )
   })
   
-  // Cleanup on process exit
   process.on('SIGINT', () => {
     connectionManager.closeAll()
     process.exit(0)
@@ -358,8 +341,6 @@ const guessPortForNode = (node: string): number => {
   return base + offset
 }
 
-// forwardToNode is now handled by ConnectionManager.sendMessage
-// This function is kept for backward compatibility but should not be used
 const forwardToNode = async (
   node: string,
   port: number,

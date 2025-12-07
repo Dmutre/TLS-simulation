@@ -20,7 +20,6 @@ const main = async () => {
   const args = parseArgs()
   const port = Number(args['port'] ?? 9000)
 
-  // rootCA лежить у secrets/rootCA.crt (можеш змінити шлях)
   const rootCaPath = path.join(SECRETS_PATH, 'rootCA.crt')
   console.log('CA: loading root CA from', rootCaPath)
   console.log('SECRETS_PATH:', SECRETS_PATH)
@@ -66,7 +65,6 @@ const main = async () => {
 
 const sendWithResponse = (socket: net.Socket, resp: VerifyCertResponse) => {
   const buffer = wrapMessage(resp)
-  // Тут теж симулюємо slow radio
   const { sendWithPacketLimit } = require('./helpers') as typeof import('./helpers')
   sendWithPacketLimit(socket, buffer)
 }
